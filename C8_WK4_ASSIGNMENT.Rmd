@@ -1,0 +1,176 @@
+---
+title: "Practical Machine Learing Week 4 Assignment/Report"
+author: "Khairul Izhar Khalid"
+date: "May 20, 2017"
+#output: pdf_document
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###A: INTRODUCTION, OBJECTIVE AND APPROACH:
+
+**A1 INTRODUCTION:-**
+
+The given data set in this assigment report, contains "Weight Lifting Exercises" (WLE) data, performed by the 6 participants (aged between 20-28 years). The data sets was recorded using wearable devices. Each participants was asked to perform 1 set of 10 repetitions of the Unilateral Dumbbell (1.25kg) Biceps Curl in 5 different fashions ("classe"). **1.	Class A - Exactly according to the specification; 2.	Class B - Throwing the elbows to the front; 3.	Class C - Lifting the dumbbell only halfway; 4.	Class D - Lowering the dumbbell only halfway; and 5.	Class E - Throwing the hips to the front.**
+
+**Note:** The given data set and the information above was originally based on a research. Citation Reference; please refer to **Section H: Reference.**
+
+**A2 OBJECTIVE:-**
+
+The objective of this project/assignment is to **predict** the manner in which the 6 participants did the dumbbell exercises", leveraging on the "classe" values as the main broad category. 
+
+**A3 APPROACH:-**
+
+The following describes the project approach for this assignment:
+
+**1. Data Preparation -** Load related libraries and download the the data sets from information provided in the assignment, set location path and store in working directory.
+**2. Perform Data Exploratory and Data Cleansing -** to both data sets (training and testing)
+**3. Assembling Data Partition -** into the cleansed training data set - 70%|30% (exclude the clean testing data set)
+**4. Apply caret's Generalized Boosted and Random Forest Function** into the both partitioned data sets and identify the accuracy level
+**5. The highest accuracy model is then apply to the clean testing data set to predict 20 different test cases.** The prediction results will be used for quiz submission
+
+### B: DATA PREPARATION:
+First, all the required libraries, to support our analysis and prediction are loaded (as shown below)
+
+```{r The ibraries, echo=TRUE, message=FALSE, warning=FALSE}
+#Loading neccessary libraries 
+library(ggplot2)
+library(caret)
+library(plyr)
+library(kernlab)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(e1071)
+```
+
+2 types of raw data set(s) (pml-training.csv and pml-testing.csv) was provided from the following source:
+
+1.	Training Data: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+2.	Test Data: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+```{r Data preparation stuff}
+# Assign 2 variables as raw data filenames and set path in raw data directory
+trainingFilename = file.path("rawDatasets","pml-training.csv")
+testingFilename = file.path("rawDatasets","pml-testing.csv")
+
+# Assign 2 variables as raw data sets URL source
+urlLink.Training <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+urlLink.Testing <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# Check file exist, else download the datasets, check directory exist, else  directory create
+if (!file.exists(trainingFilename) || !file.exists(testingFilename)){
+  if(!dir.exists(file.path("rawDatasets"))){
+    dir.create("rawDatasets")}
+    download.file(urlLink.Training, trainingFilename, method="curl")
+    download.file(urlLink.Testing, testingFilename, method="curl")
+}
+
+# Reads dataset from file names, assign to 2 variables, dimension output
+raw.Training <- read.csv(trainingFilename, na.strings = c("NA", ""))
+raw.Testing <- read.csv(testingFilename, na.strings = c("NA", ""))
+dim(raw.Training); dim(raw.Testing)
+```
+
+The given raw data URL link was downloaded, into "rawdataset" working directory based on the given URL link. Data input was performed, assigned to 2 variables (raw.Training and raw.Testing). **The dimensions indicated that raw.Training = 19622 objects and 160 variables, and raw.Testing = 20 objects and 160 variables**
+
+### C: DATA EXPLORATARY AND DATA CLEANSING:
+Looking at the "AS IS", raw data sets, we identify NA's, DIV/0! and 7 Identifiers variables(columns) (i.e. x, "user_name", "raw_timestamp_part1","raw_timestamp_part2", "cvtd_timestamp", "new_window", "num_window"). Therefore, we have to removed the variables(columns) that contains values as stated above, to ensure that the data sets are properly cleansed before running the data partition process. 
+
+```{r}
+# Cleansing "NA" column(s)
+cleanse.Training <- raw.Training[, colSums(is.na(raw.Training)) == 0]
+cleanse.Testing <- raw.Testing[, colSums(is.na(raw.Testing)) == 0]
+
+# Cleansing columns 1 to 7 
+cleanse.Training <- cleanse.Training[, -c(1:7)]
+cleanse.Testing <- cleanse.Testing[, -c(1:7)]
+
+# Get Cleanse Data Dimensions
+dim(cleanse.Training); dim(cleanse.Testing)
+```
+
+The outcome of the data cleansing process resulted into variables(columns) reduction: **cleanse.Training = 19622 objects and 53 variables; 2. cleanse.Testing = 19622 objects and 53 variables**
+
+### D: ASSEMBLING DATA PARTITION FOR PREDICTION MODEL:
+The createDataPartition function was then applied to create 2 data partition, leveraging on "cleanse.Training" data set. **"trainSet" is allocated 70% of cleanse.Training and "testSet" is allocated 30% of cleanse.Training**
+
+```{r Create Data Partition, warning=FALSE}
+#Create partition data into cleanse.Training data set, (allocate 0.7/70%)
+partition.Data <-createDataPartition(y=cleanse.Training$classe, p=0.7, list = FALSE)
+
+# assign partiondata(0.7/70%) into datapartition4.Training
+trainSet <-cleanse.Training[partition.Data,]
+
+# assign -partiondata(remaining 30%) into datapartition4.Testing
+testSet <-cleanse.Training[-partition.Data,]
+
+# Output Dimensions information
+dim(trainSet); dim(testSet)
+```
+
+**After data partition: trainSet: 13737 objects; testSet: 5885 objects.** Both data partitions will be applied into Random Forest function and caret's Generalized Boosted Model(aka gbm) for prediction models.The model with highest accuracy will be used for quiz predictions, leveraging on "cleanse.Testing" data set.
+
+### E: GENERALIZED BOOSTED MODEL:
+```{r caret method gbm, message=FALSE, warning=FALSE}
+set.seed(1969) # set seed to obtain similar results
+
+# assign control paramaters for train environment
+gbmTrainctrl <- trainControl(method = "cv", number = 5, repeats = 1)
+
+# apply mod.gbm with gmb method
+mod.gbm  <- train(classe~.,data=trainSet,method="gbm",trControl=gbmTrainctrl,verbose =FALSE)
+
+# apply prediction on testSet dataset based on mod.gbm
+predictor.gbm <- predict(mod.gbm, newdata=testSet)
+
+# apply confusion matrix to get accuracy summary, display output
+cm.gbm <- confusionMatrix(predictor.gbm, testSet$classe)
+cm.gbm
+```
+
+
+### F: RANDOM FOREST:
+```{r random forest function, message=FALSE, warning=FALSE}
+set.seed(1970) # set seed to obtain similar results
+
+# assign control paramaters for train environment
+rfTrainctrl <- trainControl(method="cv",number=4, allowParallel=TRUE)
+
+# mod.rf random forest
+mod.rf <- randomForest(classe~.,method="class",data=trainSet,trControl= rfTrainctrl)
+
+# apply prediction on testSet dataset based on random forest fit
+predictor.rf <- predict(mod.rf,newdata=testSet)
+
+# apply caret confusion matrix to get accuracy summary, display output
+cm.rf <- confusionMatrix(predictor.rf,testSet$classe)
+cm.rf
+```
+
+### G: WHICH MODEL IS APPLY TO CLEANSED TEST DATA?:
+The overall accuracy percentage results shown in confusion matrix clearly indicates random forest has the highest accuracy. Therefore, **Random Forest Model will be applied into the quiz predictions**, leveraging on cleansed testing data set. The result is shown below:
+
+```{r Predict for quiz, echo=TRUE, message=FALSE, warning=FALSE}
+Quizpredictor4.cleanseTesting <- predict(mod.rf, newdata=cleanse.Testing)
+Quizpredictor4.cleanseTesting 
+```
+
+### H: REFERENCE:
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013. Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4hyNSlNVh
+
+### I: APPENDIX 1: 
+```{r Other supporting output, echo=TRUE, message=FALSE, warning=FALSE}
+# raw training data structure
+str(raw.Training)
+
+# plot mod.rf and mod.gbm
+plot(mod.gbm)
+plot(mod.rf)
+```
+
+
+
